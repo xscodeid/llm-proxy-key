@@ -2,9 +2,26 @@ import { Request, Response } from "express";
 import { APIFormatContext } from "../types/api";
 import { APIMapper } from "../utils/apiMapper";
 import { extractUsageFromChunk, logTokenUsage } from "../utils/tokenUsage";
+
+const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
+
+/**
+ * Handles a streaming (SSE) upstream request.
+ *
+ * Returns true if the response was successfully piped to the client.
+ * Returns false if the response was not OK and the status is retryable
+ * (so the caller can retry with a different key without double-sending).
+ *
+ * IMPORTANT: This function sends the response only for:
+ *   - Non-retryable errors (400, 401, 403, etc.)
+ *   - Stream errors after SSE started
+ *
+ * For retryable upstream errors, it returns false without sending,
+ * allowing the retry loop to pick a different key.
+ */
 export async function handleStreamingRequest(
   context: APIFormatContext,
-  req: Request,
+  _req: Request,
   res: Response,
   response: globalThis.Response
 ): Promise<boolean> {
@@ -16,6 +33,12 @@ export async function handleStreamingRequest(
     const errorText = await response.text();
     console.error("[error] details:", errorText.substring(0, 500));
 
+    // If retryable, do NOT send response — let the retry loop handle it.
+    if (RETRYABLE_STATUS_CODES.has(response.status)) {
+      return false;
+    }
+
+    // Non-retryable — send error to client.
     res.status(response.status).json({
       error: `API Error: ${response.status}`,
       message: response.statusText,
@@ -52,8 +75,8 @@ export async function handleStreamingRequest(
     reader.cancel().catch(() => {});
   };
 
-  req.on("close", cleanup);
-  req.on("aborted", cleanup);
+  _req.on("close", cleanup);
+  _req.on("aborted", cleanup);
   res.on("close", cleanup);
 
   try {
@@ -63,16 +86,15 @@ export async function handleStreamingRequest(
       if (done) break;
       if (!isStreamActive || res.destroyed) break;
 
-      let chunk = decoder.decode(value, { stream: true });
+      const chunk = decoder.decode(value, { stream: true });
 
       const usage = extractUsageFromChunk(chunk);
       if (usage) {
         logTokenUsage(usage);
       }
 
-      chunk = APIMapper.mapStreamingChunk(chunk, context);
-
-      res.write(chunk);
+      const mappedChunk = APIMapper.mapStreamingChunk(chunk, context);
+      res.write(mappedChunk);
     }
   } catch (readError) {
     console.error("[error] Stream read error:", readError);

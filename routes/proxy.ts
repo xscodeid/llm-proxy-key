@@ -1,5 +1,6 @@
 import { Agent as HttpAgent } from "http";
 import { Agent as HttpsAgent } from "https";
+import { createTimingSafeEqual } from "../utils/crypto";
 import { Request, Response } from "express";
 import { handleNonStreamingRequest } from "../services/nonStreamingRequest";
 import { handleStreamingRequest } from "../services/streamingRequest";
@@ -41,6 +42,28 @@ function extractBearerToken(header: string | undefined): string | null {
   return header.slice(BEARER_PREFIX.length);
 }
 
+/**
+ * Sends a final error response that includes which key was used.
+ */
+function sendFinalError(
+  res: Response,
+  statusCode: number,
+  statusText: string,
+  message: string,
+  keyIndex: number,
+  keyTotal: number
+): void {
+  if (res.headersSent) {
+    return;
+  }
+  res.status(statusCode).json({
+    error: `API Error: ${statusCode}`,
+    message: statusText,
+    details: message,
+    key: `${keyIndex}/${keyTotal}`,
+  });
+}
+
 export async function proxyHandler(
   req: Request,
   res: Response,
@@ -66,7 +89,8 @@ export async function proxyHandler(
         });
         return;
       }
-      if (clientKey !== proxyAuthKey) {
+      // Timing-safe comparison to prevent timing attacks.
+      if (!createTimingSafeEqual(clientKey, proxyAuthKey)) {
         res.status(403).json({
           error: "Forbidden",
           message: "Invalid proxy auth key.",
@@ -242,13 +266,15 @@ async function handleStreamingWithRetry(
       const errorText = await response.text();
       console.error("[error] details:", errorText.substring(0, 500));
 
-      res.status(response.status).json({
-        error: `API Error: ${response.status}`,
-        message: response.statusText,
-        details: errorText.startsWith("<!DOCTYPE")
-          ? "HTML error page returned"
-          : errorText.substring(0, 200),
-      });
+      if (!res.headersSent) {
+        res.status(response.status).json({
+          error: `API Error: ${response.status}`,
+          message: response.statusText,
+          details: errorText.startsWith("<!DOCTYPE")
+            ? "HTML error page returned"
+            : errorText.substring(0, 200),
+        });
+      }
       return false;
     }
 
@@ -257,11 +283,18 @@ async function handleStreamingWithRetry(
         `[error] API response ${response.status} ${response.statusText} — no more retries`
       );
       const errorText = await response.text();
-      res.status(response.status).json({
-        error: `API Error: ${response.status}`,
-        message: response.statusText,
-        details: errorText.substring(0, 200),
-      });
+
+      // Send final "exhausted retries" response.
+      console.error(
+        `[error] final error to client: ${response.status} ${errorText.substring(0, 200)}`
+      );
+      if (!res.headersSent) {
+        res.status(response.status).json({
+          error: `API Error: ${response.status} (exhausted retries)`,
+          message: response.statusText,
+          details: errorText.substring(0, 200),
+        });
+      }
       return false;
     }
 
@@ -281,6 +314,11 @@ async function handleStreamingWithRetry(
 /**
  * Retries non-streaming requests with a different key on retryable errors.
  * Only retries for status codes in RETRYABLE_STATUS_CODES.
+ *
+ * Response is only sent to the client for:
+ *   - Non-retryable errors (inside handleNonStreamingRequest)
+ *   - Success (inside handleNonStreamingRequest)
+ *   - All retries exhausted (final error sent here)
  */
 async function handleNonStreamingWithRetry(
   targetUrl: string,
@@ -300,6 +338,8 @@ async function handleNonStreamingWithRetry(
   let currentKey = apiKey;
   let attempt = 0;
   const maxRetries = Math.min(MAX_RETRIES, apiKeyCount - 1);
+  let lastStatus = 0;
+  let lastMessage = "";
 
   let result = await handleNonStreamingRequest(
     targetUrl,
@@ -315,6 +355,11 @@ async function handleNonStreamingWithRetry(
     return true;
   }
 
+  // If the request already sent a response (non-retryable error), stop.
+  if (res.headersSent) {
+    return false;
+  }
+
   if (
     result.statusCode !== null &&
     !RETRYABLE_STATUS_CODES.has(result.statusCode)
@@ -322,6 +367,7 @@ async function handleNonStreamingWithRetry(
     return false;
   }
 
+  // Retry loop — do NOT send response for retryable errors.
   while (attempt < maxRetries) {
     const nextKeyInfo = getNextKey(currentKey);
     if (!nextKeyInfo) {
@@ -332,6 +378,10 @@ async function handleNonStreamingWithRetry(
     console.log(
       `[retry] attempt ${attempt}/${maxRetries} with new key (${nextKeyInfo.index}/${nextKeyInfo.total})`
     );
+
+    lastStatus = result.statusCode ?? 0;
+    lastMessage =
+      result.statusCode !== null ? `Error ${result.statusCode}` : "Unknown";
 
     currentKey = nextKeyInfo.key;
     result = await handleNonStreamingRequest(
@@ -348,13 +398,29 @@ async function handleNonStreamingWithRetry(
       return true;
     }
 
+    if (res.headersSent) {
+      // Response somehow already sent — cannot retry further.
+      return false;
+    }
+
     if (
       result.statusCode !== null &&
       !RETRYABLE_STATUS_CODES.has(result.statusCode)
     ) {
+      // Non-retryable after retry — response already sent by request handler.
       return false;
     }
   }
 
+  // All retries exhausted with retryable errors — send final error.
+  if (!res.headersSent) {
+    res.status(lastStatus || 500).json({
+      error: `API Error${lastStatus ? `: ${lastStatus}` : ""} (exhausted retries)`,
+      message: lastMessage || "Request failed after all retries",
+    });
+  }
   return false;
 }
+
+// Re-export for potential external use.
+export { sendFinalError };

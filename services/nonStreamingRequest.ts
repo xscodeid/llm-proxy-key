@@ -1,7 +1,11 @@
 import { Agent as HttpAgent } from "http";
 import { Agent as HttpsAgent } from "https";
 import { Request, Response } from "express";
-import { APIFormatContext, OpenAIRequest, AnthropicRequest } from "../types/api";
+import {
+  APIFormatContext,
+  OpenAIRequest,
+  AnthropicRequest,
+} from "../types/api";
 import { APIMapper } from "../utils/apiMapper";
 import { logTokenUsage } from "../utils/tokenUsage";
 
@@ -12,6 +16,22 @@ export interface ServiceResult {
   statusCode: number | null;
 }
 
+/**
+ * Status codes that should NOT be retried (client errors except 429).
+ */
+const NON_RETRYABLE_CLIENT_ERRORS = new Set([400, 401, 403, 404, 422]);
+
+/**
+ * Handles a single non-streaming upstream request.
+ *
+ * IMPORTANT: This function sends the response to the client ONLY for
+ * non-retryable errors (400, 401, 403, 404, 422). For retryable errors
+ * (429, 5xx) it returns without sending, so the caller (retry loop)
+ * can pick a different key and try again without double-sending.
+ *
+ * When the caller is a retry loop, the final "all retries exhausted"
+ * response is sent by that loop (in proxy.ts).
+ */
 export async function handleNonStreamingRequest(
   targetUrl: string,
   apiKey: string,
@@ -39,8 +59,12 @@ export async function handleNonStreamingRequest(
     const errorText = await response.text();
     console.error("[error] details:", errorText.substring(0, 500));
 
-    const isRetriable = response.status === 429 || response.status >= 500;
-    if (!isRetriable) {
+    const isRetryable =
+      response.status === 429 ||
+      response.status === 500 ||
+      response.status === 503;
+
+    if (NON_RETRYABLE_CLIENT_ERRORS.has(response.status)) {
       const startsWithHtml = errorText.startsWith("<!DOCTYPE");
       res.status(response.status).json({
         error: `API Error: ${response.status}`,
@@ -52,6 +76,13 @@ export async function handleNonStreamingRequest(
       return { success: false, statusCode: response.status };
     }
 
+    if (!isRetryable) {
+      // Unknown status — do not retry, do not send to client;
+      // let the retry loop's caller decide.
+      return { success: false, statusCode: response.status };
+    }
+
+    // Retryable (429, 500, 503): do NOT send response, signal retry.
     return { success: false, statusCode: response.status };
   }
 
@@ -59,11 +90,8 @@ export async function handleNonStreamingRequest(
   if (!contentType || !contentType.includes("application/json")) {
     const responseText = await response.text();
     console.error("[error] unexpected content type:", contentType);
-    res.status(502).json({
-      error: "Invalid response format",
-      message: "API returned non-JSON response",
-      contentType: contentType,
-    });
+    // 502 is retryable — let the retry loop decide.
+    console.error("[error] body:", responseText.substring(0, 500));
     return { success: false, statusCode: 502 };
   }
 
@@ -72,10 +100,7 @@ export async function handleNonStreamingRequest(
     responseData = await response.json();
   } catch (parseError) {
     console.error("[error] JSON parse error:", parseError);
-    res.status(502).json({
-      error: "Response parsing failed",
-      message: "Could not parse API response as JSON",
-    });
+    // Malformed response — treat as retryable.
     return { success: false, statusCode: 502 };
   }
 

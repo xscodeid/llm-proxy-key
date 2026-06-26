@@ -2,6 +2,7 @@ import dotenv from "dotenv";
 import express, { Request, Response } from "express";
 import { configureServer } from "./config/server";
 import { corsMiddleware, handleCorsOptions } from "./middleware/cors";
+import { validateRequest } from "./middleware/validateRequest";
 import { proxyHandler, getAgent } from "./routes/proxy";
 import { resolveProvider } from "./routes/providerRouter";
 import { ProviderConfig } from "./types/provider";
@@ -35,10 +36,6 @@ interface KeyInfo {
  * Advances the rotation index for the given provider and returns the next key.
  * The index is always moved forward FIRST, so subsequent calls (including
  * retries with excludeKey) start from the correct position.
- *
- * @param provider   The provider whose key pool to rotate.
- * @param excludeKey If provided, skip any key matching this value.
- *                   Used by the retry path to avoid reusing a failed key.
  */
 function getNextKey(provider: ProviderConfig, excludeKey?: string): KeyInfo {
   const total = provider.apiKeys.length;
@@ -88,8 +85,8 @@ app.get("/health", (_req: Request, res: Response) => {
 // --- Handle OPTIONS for CORS ---
 app.options("/*splat", handleCorsOptions);
 
-// --- Main proxy route ---
-app.all("/*splat", async (req: Request, res: Response) => {
+// --- Main proxy route (validated) ---
+app.all("/*splat", validateRequest, async (req: Request, res: Response) => {
   // Resolve provider from URL path
   const provider = resolveProvider(req.path, providers);
 
@@ -114,7 +111,7 @@ app.all("/*splat", async (req: Request, res: Response) => {
   const requestedModel = requestBody?.model;
 
   if (req.path !== "/health") {
-    console.log(`\n  ┌─ [${provider.name}]`);
+    console.log(`\n  �─ [${provider.name}]`);
     console.log(`  │  Key    : ${maskApiKey(apiKey)} (${keyIndex}/${keyTotal})`);
     console.log(`  │  Model  : ${requestedModel ?? "(none)"}`);
     console.log(`  │  Path   : ${req.originalUrl}`);
@@ -126,21 +123,31 @@ app.all("/*splat", async (req: Request, res: Response) => {
   const getNextKeyForProvider = (excludeKey?: string) =>
     getNextKey(provider, excludeKey);
 
-  await proxyHandler(req, res, provider, PROXY_AUTH_KEY, apiKey, getNextKeyForProvider, getAgent(provider));
+  await proxyHandler(
+    req,
+    res,
+    provider,
+    PROXY_AUTH_KEY,
+    apiKey,
+    getNextKeyForProvider,
+    getAgent(provider)
+  );
 });
 
 const server = app.listen(process.env.PORT || 8888, () => {
   const port = process.env.PORT || 8888;
 
   console.log("");
-  console.log("  ██╗  ██╗███████╗ ██████╗  ██████╗ ██████╗ ███████╗");
-  console.log("  ╚██╗██╔╝██╔════╝██╔════╝ ██╔═══██╗██╔══██╗██╔════╝");
+  console.log("  ██�  ██�███████╗ ██████�  ██████╗ ██████╗ ███████╗");
+  console.log("  ╚██╗██╔╝██╔════╝██╔════╝ ██╔═══██╗██╔══██�██╔════╝");
   console.log("   ╚███╔╝ ███████╗██║      ██║   ██║██║  ██║█████╗  ");
-  console.log("   ██╔██╗ ╚════██║██║      ██║   ██║██║  ██║██╔══╝  ");
-  console.log("  ██╔╝ ██╗███████║╚██████╗ ╚██████╔╝██████╔╝███████╗");
-  console.log("  ╚═╝  ╚═╝╚══════╝ ╚═════╝  ╚═════╝ ╚═════╝ ╚══════╝");
+  console.log("   ██�██╗ ╚════██�██║      ██║   ██║██�  ██�██╔══╝  ");
+  console.log("  ██╔╝ ██╗███████║�██████╗ ╚██████╔╝██████╔╝███████╗");
+  console.log("  ╚═╝  ╚═╝╚══════╝ ╚═════╝  ╚═════╝ �═════╝ ╚══════╝");
   console.log("");
-  console.log("  LLM Proxy Key  —  Multi-provider API key proxy with round-robin rotation");
+  console.log(
+    "  LLM Proxy Key  —  Multi-provider API key proxy with round-robin rotation"
+  );
   console.log(`  Listening on port ${port}`);
   console.log(
     `  Providers: ${providers.map((p) => `${p.name} (${p.prefix})`).join(", ")}`

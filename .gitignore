@@ -32,3 +32,6 @@ Thumbs.db
 # Test coverage
 coverage/
 *.lcov
+
+# Test artifacts
+test/
