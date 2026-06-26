@@ -3,7 +3,9 @@
 
 ---
 
+<div style="text-align: center;">
 ![LLM Proxy Key](logo-512px.png)
+</div>
 
 > 🔄 A multi-provider AI API key proxy with round-robin rotation. Routes requests to different upstream providers based on URL path prefix. Each provider has its own endpoint, API key pool, model whitelist, and format configuration.
 
