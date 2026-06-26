@@ -68,10 +68,14 @@ function maskApiKey(key: string): string {
   return `${key.slice(0, 12)}...${key.slice(-8)}`;
 }
 
-// --- Apply middleware ---
+// --- Parse request body with configurable size limit ---
+// Default 10MB covers large context windows (up to ~2M tokens with base64 images).
+// Prevents DoS via oversized payloads while remaining compatible with all LLM APIs.
+const BODY_LIMIT = process.env.BODY_SIZE_LIMIT || "10mb";
+
 app.use(corsMiddleware);
-app.use(express.json({ limit: "100mb" }));
-app.use(express.urlencoded({ limit: "100mb", extended: true }));
+app.use(express.json({ limit: BODY_LIMIT }));
+app.use(express.urlencoded({ limit: BODY_LIMIT, extended: true }));
 
 // --- Health check endpoint ---
 app.get("/health", (_req: Request, res: Response) => {
