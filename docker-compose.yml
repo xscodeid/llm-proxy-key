@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  llm-proxy-key:
+    build: .
+    image: llm-proxy-key
+    container_name: llm-proxy-key
+    ports:
+      - "${PORT}:${PORT}"
+    environment:
+      - PROXY_AUTH_KEY=${PROXY_AUTH_KEY:-}
+      - PORT=${PORT}
+      - NODE_ENV=production
+    env_file:
+      - .env
+    restart: unless-stopped
+    networks:
+      - xscode-network
+
+networks:
+  xscode-network:
+    driver: bridge
