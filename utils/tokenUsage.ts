@@ -41,12 +41,15 @@ export function extractUsageFromChunk(chunkContent: string): TokenUsage | null {
 
 export function logTokenUsage(usage: TokenUsage): void {
   const cached = usage.prompt_tokens_details?.cached_tokens;
-  console.log(
-    `  ┌─ [Tokens]\n` +
-    `  │  Total   : ${usage.total_tokens.toLocaleString()}\n` +
-    `  │  Prompt  : ${usage.prompt_tokens.toLocaleString()}\n` +
-    `  │  Output  : ${usage.completion_tokens.toLocaleString()}\n` +
-    (cached ? `  │  Cached  : ${cached.toLocaleString()}\n` : "") +
-    `  └─`
-  );
+  // Async logging to avoid blocking the event loop during streaming.
+  setImmediate(() => {
+    console.log(
+      `  ┌─ [Tokens]\n` +
+      `  │  Total   : ${usage.total_tokens.toLocaleString()}\n` +
+      `  │  Prompt  : ${usage.prompt_tokens.toLocaleString()}\n` +
+      `  │  Output  : ${usage.completion_tokens.toLocaleString()}\n` +
+      (cached ? `  │  Cached  : ${cached.toLocaleString()}\n` : "") +
+      `  └─`
+    );
+  });
 }

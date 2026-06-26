@@ -112,9 +112,11 @@ export async function proxyHandler(
       needsMapping,
     };
 
-    console.log(
-      `  │  Format : ${context.clientFormat} → ${context.targetFormat}${context.needsMapping ? " (mapped)" : ""}`
-    );
+    setImmediate(() => {
+      console.log(
+        `  │  Format : ${context.clientFormat} → ${context.targetFormat}${context.needsMapping ? " (mapped)" : ""}`
+      );
+    });
 
     // --- Map request body ---
     const bodyData = APIMapper.mapRequest(req.body, context) as ProxyRequestBody;
@@ -150,11 +152,14 @@ export async function proxyHandler(
     const upstreamApiKey = initialKey;
 
     const isStreaming = (bodyData as { stream?: boolean }).stream === true;
-    console.log(
-      `  │  Type   : ${isStreaming ? "streaming" : "non-streaming"}`
-    );
-    console.log(`  │  Target : ${targetUrl}`);
-    console.log(`  └─`);
+    // Async logging to avoid blocking the event loop.
+    setImmediate(() => {
+      console.log(
+        `  │  Type   : ${isStreaming ? "streaming" : "non-streaming"}`
+      );
+      console.log(`  │  Target : ${targetUrl}`);
+      console.log(`  └─`);
+    });
 
     let success = false;
 

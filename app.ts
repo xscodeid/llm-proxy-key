@@ -115,11 +115,14 @@ app.all("/*splat", validateRequest, async (req: Request, res: Response) => {
   const requestedModel = requestBody?.model;
 
   if (req.path !== "/health") {
-    console.log(`\n  ┌─ [${provider.name}]`);
-    console.log(`  │  Key    : ${maskApiKey(apiKey)} (${keyIndex}/${keyTotal})`);
-    console.log(`  │  Model  : ${requestedModel ?? "(none)"}`);
-    console.log(`  │  Path   : ${req.originalUrl}`);
-    console.log(`  └─`);
+    // Async logging to avoid blocking the event loop.
+    setImmediate(() => {
+      console.log(`\n  ┌─ [${provider.name}]`);
+      console.log(`  │  Key    : ${maskApiKey(apiKey)} (${keyIndex}/${keyTotal})`);
+      console.log(`  │  Model  : ${requestedModel ?? "(none)"}`);
+      console.log(`  │  Path   : ${req.originalUrl}`);
+      console.log(`  └─`);
+    });
   }
 
   // Bind getNextKey to this provider so proxy.ts can call it

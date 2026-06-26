@@ -444,7 +444,7 @@ export class APIMapper {
                 type: "function" as const,
                 function: {
                   name: b.name || "",
-                  arguments: JSON.stringify(b.input ?? {}),
+                  arguments: b.input ? JSON.stringify(b.input) : "{}",
                 },
               });
             }
@@ -552,7 +552,7 @@ export class APIMapper {
               type: "tool_use",
               id: tc.id,
               name: tc.function.name,
-              input: JSON.parse(tc.function.arguments || "{}"),
+              input: tc.function.arguments ? JSON.parse(tc.function.arguments) : {},
             });
           }
         }
@@ -625,7 +625,7 @@ export class APIMapper {
           type: "function" as const,
           function: {
             name: block.name || "",
-            arguments: JSON.stringify(block.input ?? {}),
+            arguments: block.input ? JSON.stringify(block.input) : "{}",
           },
         });
       }
@@ -669,7 +669,7 @@ export class APIMapper {
           type: "tool_use",
           id: tc.id,
           name: tc.function.name,
-          input: JSON.parse(tc.function.arguments || "{}"),
+          input: tc.function.arguments ? JSON.parse(tc.function.arguments) : {},
         });
       }
     }
