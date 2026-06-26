@@ -25,6 +25,12 @@ export async function handleStreamingRequest(
   res: Response,
   response: globalThis.Response
 ): Promise<boolean> {
+  // Guard: if response already started, do not attempt to send again.
+  if (res.headersSent) {
+    console.error("[error] headers already sent — cannot start stream");
+    return false;
+  }
+
   if (!response.ok) {
     console.error(
       `[error] API response ${response.status} ${response.statusText}`

@@ -184,8 +184,10 @@ export async function proxyHandler(
       );
     }
 
-    if (!success && !res.headersSent) {
-      res.status(500).json({ error: "Request failed" });
+    // Final fallback: if handler failed and no response was sent yet,
+    // send a general error to the client.
+    if (!success && !res.headersSent && !res.writableEnded) {
+      res.status(502).json({ error: "Bad Gateway", message: "All upstream attempts failed" });
     }
   } catch (error: unknown) {
     console.error("[error] Proxy error:", error);
@@ -253,6 +255,12 @@ async function handleStreamingWithRetry(
     } as RequestInit);
 
   while (true) {
+    // Guard: if response already started (e.g. partial stream), do not retry.
+    if (res.headersSent) {
+      console.error("[error] response already started — cannot retry streaming");
+      return false;
+    }
+
     const response = await buildFetchFn(currentKey)();
 
     if (response.ok) {
@@ -413,9 +421,10 @@ async function handleNonStreamingWithRetry(
   }
 
   // All retries exhausted with retryable errors — send final error.
-  if (!res.headersSent) {
-    res.status(lastStatus || 500).json({
-      error: `API Error${lastStatus ? `: ${lastStatus}` : ""} (exhausted retries)`,
+  if (!res.headersSent && !res.writableEnded) {
+    const statusCode = lastStatus || 502;
+    res.status(statusCode).json({
+      error: `API Error: ${statusCode} (exhausted retries)`,
       message: lastMessage || "Request failed after all retries",
     });
   }
